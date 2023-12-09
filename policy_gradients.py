@@ -36,7 +36,6 @@ class DiffusionActor(MLP):
         self.optimizer.step()
 
         return loss.item()
-
 class PGAgent(nn.Module):
     def __init__(self, pretrained, gamma=0.99, learning_rate=0.01, use_baseline=False, use_reward_to_go=False,
         baseline_learning_rate=None, baseline_gradient_steps=None, gae_lambda=None, normalize_advantages=False,
@@ -63,11 +62,11 @@ class PGAgent(nn.Module):
     def _calculate_q_vals(self, rewards):
         discounted_rtg = []
         for traj_rewards in rewards:
-          traj_discounted_rtg = []
-          for t in range(len(traj_rewards)):
-            traj_discounted_rtg.append(sum([self.gamma**(i-t) * rewards[i] 
-                                            for i in range(t, len(rewards))]))
-          discounted_rtg.append(traj_discounted_rtg)
+            traj_discounted_rtg = []
+            for t in range(len(traj_rewards)):
+                traj_discounted_rtg.append(sum([self.gamma**(i-t) * traj_rewards[i].item() 
+                                                for i in range(t, len(traj_rewards))]))
+            discounted_rtg.append(traj_discounted_rtg)
 
         return np.asarray(discounted_rtg)
     
@@ -81,25 +80,28 @@ class PGAgent(nn.Module):
         # step 1: calculate Q values of each (s_t, a_t) point, using rewards (r_0, ..., r_t, ..., r_T)
         q_values = self._calculate_q_vals(rewards)
 
-        obs = np.concatenate(obs)
-        actions = np.concatenate(actions)
-        rewards = np.concatenate(rewards)
-        terminals = np.concatenate(terminals)
+
 
         # step 2: calculate advantages from Q values
         advantages: np.ndarray = self._estimate_advantage(
-            obs, rewards, q_values, terminals
+            obs, rewards, q_values
         )
 
         # step 3: use all datapoints (s_t, a_t, adv_t) to update the PG actor/policy
-        info = self.actor.update(obs, actions, advantages)
+        obs = obs.reshape(-1, obs.size(-1))
+        actions = actions.reshape(-1, actions.size(-1))
+        advantages = advantages.flatten()
+
+        actor_loss = self.actor.update(obs, actions, advantages)
 
         # step 4: if needed, use all datapoints (s_t, a_t, q_t) to update the PG critic/baseline
         if self.critic is not None:
             for _ in range(self.baseline_gradient_steps):
-                info.update(self.critic.update(obs, q_values))
+                self.critic.update(obs, q_values) # TODO: log the update information
 
-        return info
+        return actor_loss
+
+
 
 
 
