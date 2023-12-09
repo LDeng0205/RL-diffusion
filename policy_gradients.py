@@ -15,14 +15,14 @@ class DiffusionActor(MLP):
 
         self.variance = variance
         self.optimizer = torch.optim.Adam(
-            self.parameters,
+            self.parameters(),
             learning_rate,
         )
 
     def forward(self, obs):
-        x, t = obs[:2], obs[2]
+        x, t = obs[..., :2], obs[..., 2]
         mean = super().forward(x, t)
-        return torch.distributions.MultivariateNormal(mean, self.variance * torch.eye(x.shape[0]))
+        return torch.distributions.MultivariateNormal(mean, scale_tril=self.variance * torch.eye(mean.shape[1]).repeat(mean.shape[0], 1, 1))
     
     def update(self, obs, actions, advantages):
         obs = torch.tensor(obs)
@@ -35,9 +35,7 @@ class DiffusionActor(MLP):
         loss.backward()
         self.optimizer.step()
 
-        return {
-            "Actor Loss": loss.numpy(),
-        }
+        return loss.item()
 
 class PGAgent(nn.Module):
     def __init__(self, pretrained, gamma=0.99, learning_rate=0.01, use_baseline=False, use_reward_to_go=False,
