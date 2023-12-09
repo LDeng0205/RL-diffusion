@@ -135,8 +135,8 @@ class NoiseScheduler():
     def __len__(self):
         return self.num_timesteps
 
-def sample_trajectories(model, noise_scheduler, trajectory_count=1000, trajectory_lengths=50):
-    noise_scheduler = noise_scheduler(num_timesteps=trajectory_lengths)
+def sample_trajectories(model, trajectory_count=1000, trajectory_lengths=50):
+    noise_scheduler = NoiseScheduler(num_timesteps=trajectory_lengths)
     points = torch.randn(trajectory_count, 2)
     timesteps = list(range(trajectory_lengths))[::-1]
 
@@ -192,7 +192,7 @@ def goodness(point, good_points, bad_points):
 
     return closest_bad_distance - closest_good_distance
 
-def eyes_dataset(n=8000):
+def eyes_dataset(n=800):
     rng = np.random.default_rng(42)
     
     # Generate circle points
@@ -223,7 +223,7 @@ def eyes_dataset(n=8000):
     
     return X.astype(np.float32)
 
-def mouth_dataset(n=8000):
+def mouth_dataset(n=800):
     rng = np.random.default_rng(42)
     
     # Generate circle points
@@ -307,9 +307,9 @@ if __name__ == "__main__":
 
     config = parser.parse_args()
 
-    dataset = datasets.get_dataset(config.dataset)
-    dataloader = DataLoader(
-        dataset, batch_size=config.train_batch_size, shuffle=True, drop_last=True)
+    # dataset = datasets.get_dataset(config.dataset)
+    # dataloader = DataLoader(
+    #    dataset, batch_size=config.train_batch_size, shuffle=True, drop_last=True)
 
     model = MLP(
         hidden_size=config.hidden_size,
@@ -323,7 +323,7 @@ if __name__ == "__main__":
         
     ob_dim, ac_dim = 3, 2
     agent = PGAgent(
-        pretained=model
+        model
         # wait for PGAgent to be finished ...
     )
 
@@ -351,16 +351,29 @@ if __name__ == "__main__":
     losses = []
     print("Finetunning model...")
     for epoch in range(config.num_epochs):
-        model.train()
-        progress_bar = tqdm(total=len(dataloader))
-        progress_bar.set_description(f"Epoch {epoch}")
+        # model.train()
+        # progress_bar = tqdm(total=len(dataloader))
+        # progress_bar.set_description(f"Epoch {epoch}")
 
-        trajectories = sample_trajectories(model, noise_scheduler, trajectory_count=1000, trajectory_lengths=50)
+        trajs = sample_trajectories(model, trajectory_count=1000, trajectory_lengths=50)
+        trajs = np.array(trajs)
 
-        agent.update(trajectories)
+        # save trajectories as JSON to trajs<epoch>.json. convert to json from numpy first
+        import json
+        print("Saving trajectories...")
+        # Write the list to a JSON file
+        with open('trajs.json', 'w') as file:
+            json.dump(trajs.tolist(), file)
+            
+        
+        # trajs_dict = {k: [traj[k] for traj in trajs] for k in trajs[0]}
+        
+        # train_info: dict = agent.update(trajs_dict["observation"], trajs_dict["action"], trajs_dict["reward"], trajs_dict["terminal"])
 
-        logs = {"loss": loss.detach().item(), "step": global_step}
-        losses.append(loss.detach().item())
+        # agent.update(trajs_dict)
+
+        # logs = {"loss": loss.detach().item(), "step": global_step}
+        # losses.append(loss.detach().item())
 
         if epoch % config.save_images_step == 0 or epoch == config.num_epochs - 1:
             # generate data with the model to later visualize the learning process
