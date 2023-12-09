@@ -5,12 +5,18 @@ from torch import nn
 
 from ddpm import MLP
 
+
 class DiffusionActor(MLP):
-    
-    def __init__(self, variance: float = 0.05, learning_rate: float = 0.001, hidden_size: int = 128, 
-                 hidden_layers: int = 3, emb_size: int = 128, time_emb: str = "sinusoidal", 
-                 input_emb: str = "sinusoidal"):
-        
+    def __init__(
+        self,
+        variance: float = 0.05,
+        learning_rate: float = 0.001,
+        hidden_size: int = 128,
+        hidden_layers: int = 3,
+        emb_size: int = 128,
+        time_emb: str = "sinusoidal",
+        input_emb: str = "sinusoidal",
+    ):
         super().__init__(hidden_size, hidden_layers, emb_size, time_emb, input_emb)
 
         self.variance = variance
@@ -22,8 +28,12 @@ class DiffusionActor(MLP):
     def forward(self, obs):
         x, t = obs[..., :2], obs[..., 2]
         mean = super().forward(x, t)
-        return torch.distributions.MultivariateNormal(mean, scale_tril=self.variance * torch.eye(mean.shape[1]).repeat(mean.shape[0], 1, 1))
-    
+        return torch.distributions.MultivariateNormal(
+            mean,
+            scale_tril=self.variance
+            * torch.eye(mean.shape[1]).repeat(mean.shape[0], 1, 1),
+        )
+
     def update(self, obs, actions, advantages):
         obs = torch.tensor(obs)
         actions = torch.tensor(actions)
@@ -36,9 +46,20 @@ class DiffusionActor(MLP):
         self.optimizer.step()
 
         return loss.item()
+
+
 class PGAgent(nn.Module):
-    def __init__(self, pretrained, gamma=0.99, learning_rate=0.01, use_baseline=False, use_reward_to_go=False,
-        baseline_learning_rate=None, baseline_gradient_steps=None, gae_lambda=None, normalize_advantages=False,
+    def __init__(
+        self,
+        pretrained,
+        gamma=0.99,
+        learning_rate=0.01,
+        use_baseline=False,
+        use_reward_to_go=False,
+        baseline_learning_rate=None,
+        baseline_gradient_steps=None,
+        gae_lambda=None,
+        normalize_advantages=False,
     ):
         super().__init__()
 
@@ -47,7 +68,7 @@ class PGAgent(nn.Module):
 
         # create the critic (baseline) network, if needed
         if use_baseline:
-            #TODO implement critic network self.critic = 
+            # TODO implement critic network self.critic =
             self.baseline_gradient_steps = baseline_gradient_steps
         else:
             self.critic = None
@@ -58,34 +79,36 @@ class PGAgent(nn.Module):
         self.gae_lambda = gae_lambda
         self.normalize_advantages = normalize_advantages
 
-
     def _calculate_q_vals(self, rewards):
         discounted_rtg = []
         for traj_rewards in rewards:
             traj_discounted_rtg = []
             for t in range(len(traj_rewards)):
-                traj_discounted_rtg.append(sum([self.gamma**(i-t) * traj_rewards[i].item() 
-                                                for i in range(t, len(traj_rewards))]))
+                traj_discounted_rtg.append(
+                    sum(
+                        [
+                            self.gamma ** (i - t) * traj_rewards[i].item()
+                            for i in range(t, len(traj_rewards))
+                        ]
+                    )
+                )
             discounted_rtg.append(traj_discounted_rtg)
 
         return np.asarray(discounted_rtg)
-    
+
     def _estimate_advantage(self, obs, rewards, q_values):
         # If no baseline (value function), just return q_values
         # TODO: implement reward
         return q_values
-    
+
     def update(self, obs, actions, rewards):
-        
+        print(obs.shape, actions.shape, rewards.shape)
+
         # step 1: calculate Q values of each (s_t, a_t) point, using rewards (r_0, ..., r_t, ..., r_T)
         q_values = self._calculate_q_vals(rewards)
 
-
-
         # step 2: calculate advantages from Q values
-        advantages: np.ndarray = self._estimate_advantage(
-            obs, rewards, q_values
-        )
+        advantages: np.ndarray = self._estimate_advantage(obs, rewards, q_values)
 
         # step 3: use all datapoints (s_t, a_t, adv_t) to update the PG actor/policy
         obs = obs.reshape(-1, obs.size(-1))
@@ -97,13 +120,9 @@ class PGAgent(nn.Module):
         # step 4: if needed, use all datapoints (s_t, a_t, q_t) to update the PG critic/baseline
         if self.critic is not None:
             for _ in range(self.baseline_gradient_steps):
-                self.critic.update(obs, q_values) # TODO: log the update information
+                self.critic.update(obs, q_values)  # TODO: log the update information
 
         return actor_loss
-
-
-
-
 
 
 """

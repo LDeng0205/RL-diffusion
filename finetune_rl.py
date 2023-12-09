@@ -13,7 +13,7 @@ import numpy as np
 import datasets
 from positional_embeddings import PositionalEmbedding
 
-from policy_gradients import PGAgent
+from policy_gradients import DiffusionActor, PGAgent
 
 
 class Block(nn.Module):
@@ -28,16 +28,25 @@ class Block(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, hidden_size: int = 128, hidden_layers: int = 3, emb_size: int = 128,
-                 time_emb: str = "sinusoidal", input_emb: str = "sinusoidal"):
+    def __init__(
+        self,
+        hidden_size: int = 128,
+        hidden_layers: int = 3,
+        emb_size: int = 128,
+        time_emb: str = "sinusoidal",
+        input_emb: str = "sinusoidal",
+    ):
         super().__init__()
 
         self.time_mlp = PositionalEmbedding(emb_size, time_emb)
         self.input_mlp1 = PositionalEmbedding(emb_size, input_emb, scale=25.0)
         self.input_mlp2 = PositionalEmbedding(emb_size, input_emb, scale=25.0)
 
-        concat_size = len(self.time_mlp.layer) + \
-            len(self.input_mlp1.layer) + len(self.input_mlp2.layer)
+        concat_size = (
+            len(self.time_mlp.layer)
+            + len(self.input_mlp1.layer)
+            + len(self.input_mlp2.layer)
+        )
         layers = [nn.Linear(concat_size, hidden_size), nn.GELU()]
         for _ in range(hidden_layers):
             layers.append(Block(hidden_size))
@@ -53,38 +62,53 @@ class MLP(nn.Module):
         return x
 
 
-class NoiseScheduler():
-    def __init__(self,
-                 num_timesteps=1000,
-                 beta_start=0.0001,
-                 beta_end=0.02,
-                 beta_schedule="linear"):
-
+class NoiseScheduler:
+    def __init__(
+        self,
+        num_timesteps=1000,
+        beta_start=0.0001,
+        beta_end=0.02,
+        beta_schedule="linear",
+    ):
         self.num_timesteps = num_timesteps
         if beta_schedule == "linear":
             self.betas = torch.linspace(
-                beta_start, beta_end, num_timesteps, dtype=torch.float32)
+                beta_start, beta_end, num_timesteps, dtype=torch.float32
+            )
         elif beta_schedule == "quadratic":
-            self.betas = torch.linspace(
-                beta_start ** 0.5, beta_end ** 0.5, num_timesteps, dtype=torch.float32) ** 2
+            self.betas = (
+                torch.linspace(
+                    beta_start**0.5,
+                    beta_end**0.5,
+                    num_timesteps,
+                    dtype=torch.float32,
+                )
+                ** 2
+            )
 
         self.alphas = 1.0 - self.betas
         self.alphas_cumprod = torch.cumprod(self.alphas, axis=0)
-        self.alphas_cumprod_prev = F.pad(
-            self.alphas_cumprod[:-1], (1, 0), value=1.)
+        self.alphas_cumprod_prev = F.pad(self.alphas_cumprod[:-1], (1, 0), value=1.0)
 
         # required for self.add_noise
-        self.sqrt_alphas_cumprod = self.alphas_cumprod ** 0.5
+        self.sqrt_alphas_cumprod = self.alphas_cumprod**0.5
         self.sqrt_one_minus_alphas_cumprod = (1 - self.alphas_cumprod) ** 0.5
 
         # required for reconstruct_x0
         self.sqrt_inv_alphas_cumprod = torch.sqrt(1 / self.alphas_cumprod)
-        self.sqrt_inv_alphas_cumprod_minus_one = torch.sqrt(
-            1 / self.alphas_cumprod - 1)
+        self.sqrt_inv_alphas_cumprod_minus_one = torch.sqrt(1 / self.alphas_cumprod - 1)
 
         # required for q_posterior
-        self.posterior_mean_coef1 = self.betas * torch.sqrt(self.alphas_cumprod_prev) / (1. - self.alphas_cumprod)
-        self.posterior_mean_coef2 = (1. - self.alphas_cumprod_prev) * torch.sqrt(self.alphas) / (1. - self.alphas_cumprod)
+        self.posterior_mean_coef1 = (
+            self.betas
+            * torch.sqrt(self.alphas_cumprod_prev)
+            / (1.0 - self.alphas_cumprod)
+        )
+        self.posterior_mean_coef2 = (
+            (1.0 - self.alphas_cumprod_prev)
+            * torch.sqrt(self.alphas)
+            / (1.0 - self.alphas_cumprod)
+        )
 
     def reconstruct_x0(self, x_t, t, noise):
         s1 = self.sqrt_inv_alphas_cumprod[t]
@@ -105,7 +129,11 @@ class NoiseScheduler():
         if t == 0:
             return 0
 
-        variance = self.betas[t] * (1. - self.alphas_cumprod_prev[t]) / (1. - self.alphas_cumprod[t])
+        variance = (
+            self.betas[t]
+            * (1.0 - self.alphas_cumprod_prev[t])
+            / (1.0 - self.alphas_cumprod[t])
+        )
         variance = variance.clip(1e-20)
         return variance
 
@@ -135,69 +163,81 @@ class NoiseScheduler():
     def __len__(self):
         return self.num_timesteps
 
+
 def sample_trajectories(model, trajectory_count=1000, trajectory_lengths=50):
     noise_scheduler = NoiseScheduler(num_timesteps=trajectory_lengths)
     points = torch.randn(trajectory_count, 2)
     timesteps = list(range(trajectory_lengths))[::-1]
 
     # SAMPLING
-    points_at_timestep_n = [] # [[P1, P2, P3], [P1, P2, P3]]
-    actions_at_timestep_n = [] # [[A1, A2, A3], [A1, A2, A3]]
+    points_at_timestep_n = []  # [[P1, P2, P3], [P1, P2, P3]]
+    actions_at_timestep_n = []  # [[A1, A2, A3], [A1, A2, A3]]
     for t in tqdm(timesteps):
-        t = torch.from_numpy(np.repeat(t, trajectory_count)).long()
+        t = torch.from_numpy(np.repeat(t, trajectory_count)).long()[:, None]
+        s = torch.concat((points, t), dim=1)
         with torch.no_grad():
-            residual = model(points, t)
+            residual = model(s).sample()
         points = noise_scheduler.step(residual, t[0], points)
-        points_at_timestep_n.append(points.numpy())
+        points_at_timestep_n.append(s)
         actions_at_timestep_n.append(residual.numpy())
 
     trajectories = []
     for i in range(trajectory_count):
         obs, next_obs, actions, rews = [], [], [], []
-        for k in range(trajectory_lengths-1):
+        for k in range(trajectory_lengths - 1):
             pos = points_at_timestep_n[k][i]
-            next_pos = points_at_timestep_n[k+1][i]
+            next_pos = points_at_timestep_n[k + 1][i]
             action = actions_at_timestep_n[k][i]
             new_state = next_pos
             timestep = trajectory_lengths - k - 1
-            
+
             obs.append(pos)
             next_obs.append(next_pos)
             actions.append(action)
-            rews.append(get_reward(new_state, timestep, end_timestep=trajectory_lengths-1))
-            
-        trajectories.append({
-            "observation": np.array(obs, dtype=np.float32),
-            "next_obersation": np.array(next_obs, dtype=np.float32),
-            "action": np.array(actions, dtype=np.float32),
-            "reward": np.array(rews, dtype=np.float32)
-        })
+            rews.append(
+                get_reward(new_state, timestep, end_timestep=trajectory_lengths - 1)
+            )
+
+        trajectories.append(
+            {
+                "observation": np.array(obs, dtype=np.float32),
+                "next_observation": np.array(next_obs, dtype=np.float32),
+                "action": np.array(actions, dtype=np.float32),
+                "reward": np.array(rews, dtype=np.float32),
+            }
+        )
 
     return trajectories
+
 
 def goodness(point, good_points, bad_points):
     import math
 
     closest_good_distance = float("inf")
     for good_point in good_points:
-        distance = math.sqrt((point[0] - good_point[0])**2 + (point[1] - good_point[1])**2)
+        distance = math.sqrt(
+            (point[0] - good_point[0]) ** 2 + (point[1] - good_point[1]) ** 2
+        )
         if distance < closest_good_distance:
             closest_good_distance = distance
 
     closest_bad_distance = float("inf")
     for bad_point in bad_points:
-        distance = math.sqrt((point[0] - bad_point[0])**2 + (point[1] - bad_point[1])**2)
+        distance = math.sqrt(
+            (point[0] - bad_point[0]) ** 2 + (point[1] - bad_point[1]) ** 2
+        )
         if distance < closest_bad_distance:
             closest_bad_distance = distance
 
     return closest_bad_distance - closest_good_distance
 
+
 def eyes_dataset(n=800):
     rng = np.random.default_rng(42)
-    
+
     # Generate circle points
-    x = np.round(rng.uniform(-0.5, 0.5, n)/2, 1)*2
-    y = np.round(rng.uniform(-0.5, 0.5, n)/2, 1)*2
+    x = np.round(rng.uniform(-0.5, 0.5, n) / 2, 1) * 2
+    y = np.round(rng.uniform(-0.5, 0.5, n) / 2, 1) * 2
     norm = np.sqrt(x**2 + y**2) + 1e-10
     x /= norm
     y /= norm
@@ -209,10 +249,12 @@ def eyes_dataset(n=800):
     y += r * np.sin(theta)
 
     # Eyes: adding points for two small circles
-    for eye_x in [-0.5, 0.5]: # x-coordinates for left and right eyes
+    for eye_x in [-0.5, 0.5]:  # x-coordinates for left and right eyes
         eye_y = 0.5  # y-coordinate (same for both eyes)
         eye_radius = 0.2
-        t = 2 * np.pi * rng.uniform(0, 1, n//20)  # divide by 20 to have fewer points for eyes
+        t = (
+            2 * np.pi * rng.uniform(0, 1, n // 20)
+        )  # divide by 20 to have fewer points for eyes
         eye_points_x = eye_x + eye_radius * np.cos(t)
         eye_points_y = eye_y + eye_radius * np.sin(t)
         x = np.concatenate([x, eye_points_x])
@@ -220,15 +262,16 @@ def eyes_dataset(n=800):
 
     X = np.stack((x, y), axis=1)
     X *= 3
-    
+
     return X.astype(np.float32)
+
 
 def mouth_dataset(n=800):
     rng = np.random.default_rng(42)
-    
+
     # Generate circle points
-    x = np.round(rng.uniform(-0.5, 0.5, n)/2, 1)*2
-    y = np.round(rng.uniform(-0.5, 0.5, n)/2, 1)*2
+    x = np.round(rng.uniform(-0.5, 0.5, n) / 2, 1) * 2
+    y = np.round(rng.uniform(-0.5, 0.5, n) / 2, 1) * 2
     norm = np.sqrt(x**2 + y**2) + 1e-10
     x /= norm
     y /= norm
@@ -241,42 +284,65 @@ def mouth_dataset(n=800):
 
     # Mouth: adding points for a semi-circle
     mouth_radius = 0.5
-    t = np.pi * rng.uniform(0, 1, n//10)  # divide by 10 to have fewer points for mouth
+    t = np.pi * rng.uniform(
+        0, 1, n // 10
+    )  # divide by 10 to have fewer points for mouth
     mouth_points_x = mouth_radius * np.cos(t)
-    mouth_points_y = -(0.5 + mouth_radius * np.sin(t) - mouth_radius)  # adjust y to position the mouth correctly
+    mouth_points_y = -(
+        0.5 + mouth_radius * np.sin(t) - mouth_radius
+    )  # adjust y to position the mouth correctly
     x = np.concatenate([x, mouth_points_x])
     y = np.concatenate([y, mouth_points_y])
 
     X = np.stack((x, y), axis=1)
     X *= 3
-    
+
     return X.astype(np.float32)
 
+
 def get_reward(position, timestep, end_timestep):
-  # compute distance to prefered points and disliked points, return average
+    # compute distance to prefered points and disliked points, return average
 
-  good_points = mouth_dataset()
-  bad_points = eyes_dataset()
+    good_points = mouth_dataset()
+    bad_points = eyes_dataset()
 
-  if timestep == end_timestep:
-    return goodness(position, good_points, bad_points)
+    if timestep == end_timestep:
+        return goodness(position, good_points, bad_points)
 
-  return 0
+    return 0
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--load_model", type=str, default=None)
     parser.add_argument("--experiment_name", type=str, default="base")
-    parser.add_argument("--dataset", type=str, default="dino", choices=["circle", "dino", "line", "moons"])
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="dino",
+        choices=["circle", "dino", "line", "moons"],
+    )
     parser.add_argument("--num_epochs", type=int, default=200)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--num_timesteps", type=int, default=50)
-    parser.add_argument("--beta_schedule", type=str, default="linear", choices=["linear", "quadratic"])
+    parser.add_argument(
+        "--beta_schedule", type=str, default="linear", choices=["linear", "quadratic"]
+    )
     parser.add_argument("--embedding_size", type=int, default=128)
     parser.add_argument("--hidden_size", type=int, default=128)
     parser.add_argument("--hidden_layers", type=int, default=3)
-    parser.add_argument("--time_embedding", type=str, default="sinusoidal", choices=["sinusoidal", "learnable", "linear", "zero"])
-    parser.add_argument("--input_embedding", type=str, default="sinusoidal", choices=["sinusoidal", "learnable", "linear", "identity"])
+    parser.add_argument(
+        "--time_embedding",
+        type=str,
+        default="sinusoidal",
+        choices=["sinusoidal", "learnable", "linear", "zero"],
+    )
+    parser.add_argument(
+        "--input_embedding",
+        type=str,
+        default="sinusoidal",
+        choices=["sinusoidal", "learnable", "linear", "identity"],
+    )
     parser.add_argument("--save_images_step", type=int, default=1)
 
     parser.add_argument("--n_iter", "-n", type=int, default=200)
@@ -311,25 +377,41 @@ if __name__ == "__main__":
     # dataloader = DataLoader(
     #    dataset, batch_size=config.train_batch_size, shuffle=True, drop_last=True)
 
-    model = MLP(
-        hidden_size=config.hidden_size,
-        hidden_layers=config.hidden_layers,
-        emb_size=config.embedding_size,
-        time_emb=config.time_embedding,
-        input_emb=config.input_embedding)
+    # model = MLP(
+    #     hidden_size=config.hidden_size,
+    #     hidden_layers=config.hidden_layers,
+    #     emb_size=config.embedding_size,
+    #     time_emb=config.time_embedding,
+    #     input_emb=config.input_embedding,
+    # )
+
+    model = DiffusionActor(
+        hidden_size=128,
+        hidden_layers=3,
+        emb_size=128,
+        learning_rate=1e-5,
+        time_emb="sinusoidal",
+        input_emb="sinusoidal",
+    )
 
     if config.load_model:
         model.load_state_dict(torch.load(config.load_model))
-        
+
     ob_dim, ac_dim = 3, 2
     agent = PGAgent(
-        model
-        # wait for PGAgent to be finished ...
+        pretrained=model,
+        learning_rate=config.learning_rate,
+        use_baseline=config.use_baseline,
+        use_reward_to_go=config.use_reward_to_go,
+        baseline_learning_rate=config.baseline_learning_rate,
+        baseline_gradient_steps=config.baseline_gradient_steps,
+        gae_lambda=config.gae_lambda,
+        normalize_advantages=config.normalize_advantages,
     )
 
     noise_scheduler = NoiseScheduler(
-        num_timesteps=config.num_timesteps,
-        beta_schedule=config.beta_schedule)
+        num_timesteps=config.num_timesteps, beta_schedule=config.beta_schedule
+    )
 
     """
     for epoch in n_epochs:
@@ -355,59 +437,64 @@ if __name__ == "__main__":
         # progress_bar = tqdm(total=len(dataloader))
         # progress_bar.set_description(f"Epoch {epoch}")
 
-        trajs = sample_trajectories(model, trajectory_count=1000, trajectory_lengths=50)
-        trajs = np.array(trajs)
+        trajs = sample_trajectories(model, trajectory_count=100, trajectory_lengths=50)
 
-        # save trajectories as JSON to trajs<epoch>.json. convert to json from numpy first
-        import json
-        print("Saving trajectories...")
-        # Write the list to a JSON file
-        with open('trajs.json', 'w') as file:
-            json.dump(trajs.tolist(), file)
-            
-        
-        # trajs_dict = {k: [traj[k] for traj in trajs] for k in trajs[0]}
-        
-        # train_info: dict = agent.update(trajs_dict["observation"], trajs_dict["action"], trajs_dict["reward"], trajs_dict["terminal"])
+        # xmin, xmax = -6, 6
+        # ymin, ymax = -6, 6
+        # plt.xlim(xmin, xmax)
+        # plt.ylim(ymin, ymax)
+        # for t in trajs[:100]:
+        #     # plt.plot(t["observation"][:, 0], t["observation"][:, 1])
+        #     plt.scatter(t["observation"][:, 0][-1], t["observation"][:, 1][-1])
+        # plt.savefig("./points_path_plot4.png")
+        # exit()
+
+        trajs_dict = {k: torch.Tensor([traj[k] for traj in trajs]) for k in trajs[0]}
+        loss = agent.update(
+            trajs_dict["observation"],
+            trajs_dict["action"],
+            trajs_dict["reward"],
+        )
+        print(f"{epoch} / {config.num_epochs} loss: {loss}")
 
         # agent.update(trajs_dict)
 
         # logs = {"loss": loss.detach().item(), "step": global_step}
         # losses.append(loss.detach().item())
 
-        if epoch % config.save_images_step == 0 or epoch == config.num_epochs - 1:
-            # generate data with the model to later visualize the learning process
-            model.eval()
-            sample = torch.randn(config.eval_batch_size, 2)
-            timesteps = list(range(len(noise_scheduler)))[::-1]
-            for i, t in enumerate(tqdm(timesteps)):
-                t = torch.from_numpy(np.repeat(t, config.eval_batch_size)).long()
-                with torch.no_grad():
-                    residual = model(sample, t)
-                sample = noise_scheduler.step(residual, t[0], sample)
-            frames.append(sample.numpy())
+    #     if epoch % config.save_images_step == 0 or epoch == config.num_epochs - 1:
+    #         # generate data with the model to later visualize the learning process
+    #         model.eval()
+    #         sample = torch.randn(config.eval_batch_size, 2)
+    #         timesteps = list(range(len(noise_scheduler)))[::-1]
+    #         for i, t in enumerate(tqdm(timesteps)):
+    #             t = torch.from_numpy(np.repeat(t, config.eval_batch_size)).long()
+    #             with torch.no_grad():
+    #                 residual = model(sample, t)
+    #             sample = noise_scheduler.step(residual, t[0], sample)
+    #         frames.append(sample.numpy())
 
     print("Saving model...")
     outdir = f"exps/{config.experiment_name}"
     os.makedirs(outdir, exist_ok=True)
     torch.save(model.state_dict(), f"{outdir}/model.pth")
 
-    print("Saving images...")
-    imgdir = f"{outdir}/images"
-    os.makedirs(imgdir, exist_ok=True)
-    frames = np.stack(frames)
-    xmin, xmax = -6, 6
-    ymin, ymax = -6, 6
-    for i, frame in enumerate(frames):
-        plt.figure(figsize=(10, 10))
-        plt.scatter(frame[:, 0], frame[:, 1])
-        plt.xlim(xmin, xmax)
-        plt.ylim(ymin, ymax)
-        plt.savefig(f"{imgdir}/{i:04}.png")
-        plt.close()
+    # print("Saving images...")
+    # imgdir = f"{outdir}/images"
+    # os.makedirs(imgdir, exist_ok=True)
+    # frames = np.stack(frames)
+    # xmin, xmax = -6, 6
+    # ymin, ymax = -6, 6
+    # for i, frame in enumerate(frames):
+    #     plt.figure(figsize=(10, 10))
+    #     plt.scatter(frame[:, 0], frame[:, 1])
+    #     plt.xlim(xmin, xmax)
+    #     plt.ylim(ymin, ymax)
+    #     plt.savefig(f"{imgdir}/{i:04}.png")
+    #     plt.close()
 
-    print("Saving loss as numpy array...")
-    np.save(f"{outdir}/loss.npy", np.array(losses))
+    # print("Saving loss as numpy array...")
+    # np.save(f"{outdir}/loss.npy", np.array(losses))
 
-    print("Saving frames...")
-    np.save(f"{outdir}/frames.npy", frames)
+    # print("Saving frames...")
+    # np.save(f"{outdir}/frames.npy", frames)
