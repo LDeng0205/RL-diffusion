@@ -437,7 +437,7 @@ if __name__ == "__main__":
         # progress_bar = tqdm(total=len(dataloader))
         # progress_bar.set_description(f"Epoch {epoch}")
         agent.actor.eval()
-        trajs = sample_trajectories(agent.actor, trajectory_count=200, trajectory_lengths=config.num_timesteps)
+        trajs = sample_trajectories(agent.actor, trajectory_count=200, trajectory_lengths=config.num_timesteps, device=device)
 
         # xmin, xmax = -6, 6
         # ymin, ymax = -6, 6
@@ -463,39 +463,39 @@ if __name__ == "__main__":
         # logs = {"loss": loss.detach().item(), "step": global_step}
         # losses.append(loss.detach().item())
 
-    #     if epoch % config.save_images_step == 0 or epoch == config.num_epochs - 1:
-    #         # generate data with the model to later visualize the learning process
-    #         model.eval()
-    #         sample = torch.randn(config.eval_batch_size, 2)
-    #         timesteps = list(range(len(noise_scheduler)))[::-1]
-    #         for i, t in enumerate(tqdm(timesteps)):
-    #             t = torch.from_numpy(np.repeat(t, config.eval_batch_size)).long()
-    #             with torch.no_grad():
-    #                 residual = model(sample, t)
-    #             sample = noise_scheduler.step(residual, t[0], sample)
-    #         frames.append(sample.numpy())
+        if epoch % config.save_images_step == 0 or epoch == config.num_epochs - 1:
+            # generate data with the model to later visualize the learning process
+            agent.actor.eval()
+            sample = torch.randn(config.eval_batch_size, 2).to(device)
+            timesteps = list(range(len(noise_scheduler)))[::-1]
+            for i, t in enumerate(tqdm(timesteps)):
+                t = torch.from_numpy(np.repeat(t, config.eval_batch_size)).long().to(device)
+                with torch.no_grad():
+                    residual = agent.actor(torch.cat((sample, t.unsqueeze(-1)), dim=1)).sample()
+                sample = noise_scheduler.step(residual, t[0], sample)
+            frames.append(sample.numpy())
 
     print("Saving model...")
     outdir = f"exps/{config.experiment_name}"
     os.makedirs(outdir, exist_ok=True)
     torch.save(model.state_dict(), f"{outdir}/model.pth")
 
-    # print("Saving images...")
-    # imgdir = f"{outdir}/images"
-    # os.makedirs(imgdir, exist_ok=True)
-    # frames = np.stack(frames)
-    # xmin, xmax = -6, 6
-    # ymin, ymax = -6, 6
-    # for i, frame in enumerate(frames):
-    #     plt.figure(figsize=(10, 10))
-    #     plt.scatter(frame[:, 0], frame[:, 1])
-    #     plt.xlim(xmin, xmax)
-    #     plt.ylim(ymin, ymax)
-    #     plt.savefig(f"{imgdir}/{i:04}.png")
-    #     plt.close()
+    print("Saving images...")
+    imgdir = f"{outdir}/images"
+    os.makedirs(imgdir, exist_ok=True)
+    frames = np.stack(frames)
+    xmin, xmax = -6, 6
+    ymin, ymax = -6, 6
+    for i, frame in enumerate(frames):
+        plt.figure(figsize=(10, 10))
+        plt.scatter(frame[:, 0], frame[:, 1])
+        plt.xlim(xmin, xmax)
+        plt.ylim(ymin, ymax)
+        plt.savefig(f"{imgdir}/{i:04}.png")
+        plt.close()
 
-    # print("Saving loss as numpy array...")
-    # np.save(f"{outdir}/loss.npy", np.array(losses))
+    print("Saving loss as numpy array...")
+    np.save(f"{outdir}/loss.npy", np.array(losses))
 
-    # print("Saving frames...")
-    # np.save(f"{outdir}/frames.npy", frames)
+    print("Saving frames...")
+    np.save(f"{outdir}/frames.npy", frames)

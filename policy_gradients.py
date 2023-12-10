@@ -49,7 +49,7 @@ class PGAgent(nn.Module):
     def __init__(
         self,
         pretrained,
-        gamma=0.99,
+        gamma=0.999,
         learning_rate=0.01,
         use_baseline=False,
         use_reward_to_go=False,
@@ -111,7 +111,7 @@ class PGAgent(nn.Module):
         obs = obs.reshape(-1, obs.size(-1))
         actions = actions.reshape(-1, actions.size(-1))
         advantages = advantages.flatten()
-
+        self.actor.train()
         actor_loss = self.actor.update(obs, actions, advantages)
 
         # step 4: if needed, use all datapoints (s_t, a_t, q_t) to update the PG critic/baseline
