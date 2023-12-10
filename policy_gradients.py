@@ -102,8 +102,6 @@ class PGAgent(nn.Module):
         return q_values
 
     def update(self, obs, actions, rewards):
-        print(obs.shape, actions.shape, rewards.shape)
-
         # step 1: calculate Q values of each (s_t, a_t) point, using rewards (r_0, ..., r_t, ..., r_T)
         q_values = self._calculate_q_vals(rewards)
 

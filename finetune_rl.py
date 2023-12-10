@@ -172,6 +172,7 @@ def sample_trajectories(model, trajectory_count=1000, trajectory_lengths=50):
     # SAMPLING
     points_at_timestep_n = []  # [[P1, P2, P3], [P1, P2, P3]]
     actions_at_timestep_n = []  # [[A1, A2, A3], [A1, A2, A3]]
+    print("creating trajectories...")
     for t in tqdm(timesteps):
         t = torch.from_numpy(np.repeat(t, trajectory_count)).long()[:, None]
         s = torch.concat((points, t), dim=1)
@@ -184,18 +185,17 @@ def sample_trajectories(model, trajectory_count=1000, trajectory_lengths=50):
     trajectories = []
     for i in range(trajectory_count):
         obs, next_obs, actions, rews = [], [], [], []
-        for k in range(trajectory_lengths - 1):
-            pos = points_at_timestep_n[k][i]
-            next_pos = points_at_timestep_n[k + 1][i]
+        
+        for k in range(len(timesteps)-1):
+            state = points_at_timestep_n[k][i]
+            next_state = points_at_timestep_n[k+1][i]
             action = actions_at_timestep_n[k][i]
-            new_state = next_pos
-            timestep = trajectory_lengths - k - 1
 
-            obs.append(pos)
-            next_obs.append(next_pos)
+            obs.append(state)
+            next_obs.append(next_state)
             actions.append(action)
             rews.append(
-                get_reward(new_state, timestep, end_timestep=trajectory_lengths - 1)
+                get_reward(next_state, end_timestep=0)
             )
 
         trajectories.append(
@@ -235,18 +235,7 @@ def goodness(point, good_points, bad_points):
 def eyes_dataset(n=800):
     rng = np.random.default_rng(42)
 
-    # Generate circle points
-    x = np.round(rng.uniform(-0.5, 0.5, n) / 2, 1) * 2
-    y = np.round(rng.uniform(-0.5, 0.5, n) / 2, 1) * 2
-    norm = np.sqrt(x**2 + y**2) + 1e-10
-    x /= norm
-    y /= norm
-
-    # Add noise
-    theta = 2 * np.pi * rng.uniform(0, 1, n)
-    r = rng.uniform(0, 0.03, n)
-    x += r * np.cos(theta)
-    y += r * np.sin(theta)
+    x, y = [], []
 
     # Eyes: adding points for two small circles
     for eye_x in [-0.5, 0.5]:  # x-coordinates for left and right eyes
@@ -300,16 +289,18 @@ def mouth_dataset(n=800):
     return X.astype(np.float32)
 
 
-def get_reward(position, timestep, end_timestep):
+def get_reward(state, end_timestep):
     # compute distance to prefered points and disliked points, return average
+    position, timestep = state[:2], state[2]    
 
-    good_points = mouth_dataset()
-    bad_points = eyes_dataset()
+    good_points = mouth_dataset(n=50)
+    bad_points = eyes_dataset(n=50)
 
-    if timestep == end_timestep:
-        return goodness(position, good_points, bad_points)
+    # if timestep.item() == end_timestep:
+    return goodness(position, good_points, bad_points)
 
-    return 0
+    # return 0
+    # return 1 / (position[1] + 1e-6)
 
 
 if __name__ == "__main__":
@@ -343,7 +334,7 @@ if __name__ == "__main__":
         default="sinusoidal",
         choices=["sinusoidal", "learnable", "linear", "identity"],
     )
-    parser.add_argument("--save_images_step", type=int, default=1)
+    parser.add_argument("--save_images_step", type=int, default=5)
 
     parser.add_argument("--n_iter", "-n", type=int, default=200)
     parser.add_argument("--use_reward_to_go", "-rtg", action="store_true")
@@ -389,7 +380,7 @@ if __name__ == "__main__":
         hidden_size=128,
         hidden_layers=3,
         emb_size=128,
-        learning_rate=1e-3,
+        learning_rate=1e-4,
         time_emb="sinusoidal",
         input_emb="sinusoidal",
     )
@@ -432,24 +423,19 @@ if __name__ == "__main__":
     frames = []
     losses = []
     print("Finetunning model...")
+    
+    outdir = f"exps/{config.experiment_name}"
+    os.makedirs(outdir, exist_ok=True)
+    
     for epoch in range(config.num_epochs):
         # model.train()
         # progress_bar = tqdm(total=len(dataloader))
         # progress_bar.set_description(f"Epoch {epoch}")
 
-        trajs = sample_trajectories(model, trajectory_count=200, trajectory_lengths=50)
-
-        # xmin, xmax = -6, 6
-        # ymin, ymax = -6, 6
-        # plt.xlim(xmin, xmax)
-        # plt.ylim(ymin, ymax)
-        # for t in trajs[:100]:
-        #     # plt.plot(t["observation"][:, 0], t["observation"][:, 1])
-        #     plt.scatter(t["observation"][:, 0][-1], t["observation"][:, 1][-1])
-        # plt.savefig("./points_path_plot6.png")
-        # exit()
+        trajs = sample_trajectories(agent.actor, trajectory_count=200, trajectory_lengths=50)
 
         trajs_dict = {k: torch.Tensor([traj[k] for traj in trajs]) for k in trajs[0]}
+        print("updating agent...")
         loss = agent.update(
             trajs_dict["observation"],
             trajs_dict["action"],
@@ -462,21 +448,29 @@ if __name__ == "__main__":
         # logs = {"loss": loss.detach().item(), "step": global_step}
         # losses.append(loss.detach().item())
 
-    #     if epoch % config.save_images_step == 0 or epoch == config.num_epochs - 1:
-    #         # generate data with the model to later visualize the learning process
-    #         model.eval()
-    #         sample = torch.randn(config.eval_batch_size, 2)
-    #         timesteps = list(range(len(noise_scheduler)))[::-1]
-    #         for i, t in enumerate(tqdm(timesteps)):
-    #             t = torch.from_numpy(np.repeat(t, config.eval_batch_size)).long()
-    #             with torch.no_grad():
-    #                 residual = model(sample, t)
-    #             sample = noise_scheduler.step(residual, t[0], sample)
-    #         frames.append(sample.numpy())
+        if epoch % config.save_images_step == 0 or epoch == config.num_epochs - 1:
+            xmin, xmax = -6, 6
+            ymin, ymax = -6, 6
+            plt.xlim(xmin, xmax)
+            plt.ylim(ymin, ymax)
+            for t in trajs[:100]:
+                # plt.plot(t["observation"][:, 0], t["observation"][:, 1])
+                plt.scatter(t["observation"][:, 0][-1], t["observation"][:, 1][-1])
+            plt.savefig(f"{outdir}/epoch={epoch}.png")
+            plt.close()
+
+            # # generate data with the model to later visualize the learning process
+            # model.eval()
+            # sample = torch.randn(config.eval_batch_size, 2)
+            # timesteps = list(range(len(noise_scheduler)))[::-1]
+            # for i, t in enumerate(tqdm(timesteps)):
+            #     t = torch.from_numpy(np.repeat(t, config.eval_batch_size)).long()
+            #     with torch.no_grad():
+            #         residual = model(sample, t)
+            #     sample = noise_scheduler.step(residual, t[0], sample)
+            # frames.append(sample.numpy())
 
     print("Saving model...")
-    outdir = f"exps/{config.experiment_name}"
-    os.makedirs(outdir, exist_ok=True)
     torch.save(model.state_dict(), f"{outdir}/model.pth")
 
     # print("Saving images...")
