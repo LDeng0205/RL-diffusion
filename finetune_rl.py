@@ -164,7 +164,7 @@ class NoiseScheduler:
         return self.num_timesteps
 
 
-def sample_trajectories(model, trajectory_count=1000, trajectory_lengths=50):
+def sample_trajectories(model, trajectory_count=1000, trajectory_lengths=50, device='cuda'):
     noise_scheduler = NoiseScheduler(num_timesteps=trajectory_lengths)
     points = torch.randn(trajectory_count, 2)
     timesteps = list(range(trajectory_lengths))[::-1]
@@ -176,10 +176,10 @@ def sample_trajectories(model, trajectory_count=1000, trajectory_lengths=50):
         t = torch.from_numpy(np.repeat(t, trajectory_count)).long()[:, None]
         s = torch.concat((points, t), dim=1)
         with torch.no_grad():
-            residual = model(s).sample()
-        points = noise_scheduler.step(residual, t[0], points)
-        points_at_timestep_n.append(s)
-        actions_at_timestep_n.append(residual.numpy())
+            residual = model(s.to(device)).sample()
+        points = noise_scheduler.step(residual.cpu(), t[0].cpu(), points)
+        points_at_timestep_n.append(s.cpu().numpy())
+        actions_at_timestep_n.append(residual.cpu().numpy())
 
     trajectories = []
     for i in range(trajectory_count):
@@ -370,9 +370,9 @@ if __name__ == "__main__":
     parser.add_argument("--video_log_freq", type=int, default=-1)
     parser.add_argument("--scalar_log_freq", type=int, default=1)
     parser.add_argument("--action_noise_std", type=float, default=0)
-
+    parser.add_argument("--device", type=str, default='cpu', help='')
     config = parser.parse_args()
-
+    device = config.device
     # dataset = datasets.get_dataset(config.dataset)
     # dataloader = DataLoader(
     #    dataset, batch_size=config.train_batch_size, shuffle=True, drop_last=True)
@@ -393,7 +393,7 @@ if __name__ == "__main__":
         time_emb="sinusoidal",
         input_emb="sinusoidal",
     )
-
+    model = model.to(device)
     if config.load_model:
         model.load_state_dict(torch.load(config.load_model))
 
@@ -449,7 +449,7 @@ if __name__ == "__main__":
         # plt.savefig("./points_path_plot6.png")
         # exit()
 
-        trajs_dict = {k: torch.Tensor([traj[k] for traj in trajs]) for k in trajs[0]}
+        trajs_dict = {k: torch.Tensor([traj[k] for traj in trajs]).to(device) for k in trajs[0]}
         agent.actor.train()
         loss = agent.update(
             trajs_dict["observation"],
