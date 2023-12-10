@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import math
 import torch
 
 from sklearn.datasets import make_moons
@@ -102,5 +103,53 @@ def get_dataset(name, n=8000):
         return line_dataset(n)
     elif name == "circle":
         return circle_dataset(n)
+    elif name == "blob":
+        return blob_dataset(n)
     else:
         raise ValueError(f"Unknown dataset: {name}")
+
+def sample_points_in_oval(num_points, a, b, center_x=0, center_y=0, rotation_angle=0):
+    """
+    Samples points inside an oval with a customizable center and a probability decreasing with distance from the origin.
+
+    Parameters:
+    num_points (int): Number of points to sample.
+    a (float): Length of the major axis.
+    b (float): Length of the minor axis.
+    center_x (float): X-coordinate of the oval's center.
+    center_y (float): Y-coordinate of the oval's center.
+    rotation_angle (float): Angle of rotation of the oval in degrees. Default is 0.
+
+    Returns:
+    np.array: An array of points inside the oval.
+    """
+
+    # Rotation matrix
+    theta = np.radians(rotation_angle)
+    rotation_matrix = np.array([[np.cos(theta), -np.sin(theta)],
+                                [np.sin(theta), np.cos(theta)]])
+
+    # Sample points
+    points = []
+    while len(points) < num_points:
+        x, y = np.random.uniform(-a + center_x, a + center_x), np.random.uniform(-b + center_y, b + center_y)
+        distance_from_origin = np.sqrt((x - center_x)**2 + (y - center_y)**2)
+        max_distance = np.sqrt(a**2 + b**2)
+        probability_threshold = 1 - (distance_from_origin / max_distance)
+
+        if ((x - center_x)**2 / a**2) + ((y - center_y)**2 / b**2) <= 1 and np.random.random() < probability_threshold:
+            rotated_point = np.dot(rotation_matrix, np.array([x, y]))
+            points.append(rotated_point)
+
+    return np.array(points)
+
+
+def blob_dataset(n=8000):
+    print("BLOB")
+    rng = np.random.default_rng(42)
+    points = sample_points_in_oval(n, 0.2, 0.3, center_x=0.7, center_y=0.2, rotation_angle=30)
+    x = np.array([point[0] for point in points])
+    y = np.array([point[1] for point in points])
+    X = np.stack((x, y), axis=1)
+    X *= 4
+    return TensorDataset(torch.from_numpy(X.astype(np.float32)))
