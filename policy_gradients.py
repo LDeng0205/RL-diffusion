@@ -1,6 +1,8 @@
 from typing import Optional, Sequence
 import numpy as np
 import torch
+import copy
+
 from torch import nn
 
 from ddpm import MLP
@@ -96,7 +98,9 @@ class PGAgent(nn.Module):
     def _estimate_advantage(self, obs, rewards, q_values):
         # If no baseline (value function), just return q_values
         # TODO: implement reward
-        return q_values
+        advantages = copy.deepcopy(q_values)
+        advantages = (advantages - advantages.mean())/(advantages.std())
+        return advantages
 
     def update(self, obs, actions, rewards):
         # step 1: calculate Q values of each (s_t, a_t) point, using rewards (r_0, ..., r_t, ..., r_T)
