@@ -27,12 +27,12 @@ class Block(nn.Module):
 
 class MLP(nn.Module):
     def __init__(self, hidden_size: int = 128, hidden_layers: int = 3, emb_size: int = 128,
-                 time_emb: str = "sinusoidal", input_emb: str = "sinusoidal"):
+                 time_emb: str = "sinusoidal", input_emb: str = "sinusoidal", device='cuda'):
         super().__init__()
 
-        self.time_mlp = PositionalEmbedding(emb_size, time_emb)
-        self.input_mlp1 = PositionalEmbedding(emb_size, input_emb, scale=25.0)
-        self.input_mlp2 = PositionalEmbedding(emb_size, input_emb, scale=25.0)
+        self.time_mlp = PositionalEmbedding(emb_size, time_emb).to(device)
+        self.input_mlp1 = PositionalEmbedding(emb_size, input_emb, scale=25.0).to(device)
+        self.input_mlp2 = PositionalEmbedding(emb_size, input_emb, scale=25.0).to(device)
 
         concat_size = len(self.time_mlp.layer) + \
             len(self.input_mlp1.layer) + len(self.input_mlp2.layer)

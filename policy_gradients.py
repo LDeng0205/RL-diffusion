@@ -31,13 +31,10 @@ class DiffusionActor(MLP):
         return torch.distributions.MultivariateNormal(
             mean,
             scale_tril=self.variance
-            * torch.eye(mean.shape[1]).repeat(mean.shape[0], 1, 1),
+            * torch.eye(mean.shape[1]).repeat(mean.shape[0], 1, 1).to(mean.device),
         )
 
     def update(self, obs, actions, advantages):
-        obs = torch.tensor(obs)
-        actions = torch.tensor(actions)
-        advantages = torch.tensor(advantages)
 
         log_p = self.forward(obs).log_prob(actions)
         loss = -torch.sum(torch.mul(log_p, advantages))
@@ -52,7 +49,7 @@ class PGAgent(nn.Module):
     def __init__(
         self,
         pretrained,
-        gamma=0.99,
+        gamma=0.999,
         learning_rate=0.01,
         use_baseline=False,
         use_reward_to_go=False,
@@ -107,12 +104,12 @@ class PGAgent(nn.Module):
 
         # step 2: calculate advantages from Q values
         advantages: np.ndarray = self._estimate_advantage(obs, rewards, q_values)
-
+        advantages = torch.tensor(advantages).to(rewards.device)
         # step 3: use all datapoints (s_t, a_t, adv_t) to update the PG actor/policy
         obs = obs.reshape(-1, obs.size(-1))
         actions = actions.reshape(-1, actions.size(-1))
         advantages = advantages.flatten()
-
+        self.actor.train()
         actor_loss = self.actor.update(obs, actions, advantages)
 
         # step 4: if needed, use all datapoints (s_t, a_t, q_t) to update the PG critic/baseline

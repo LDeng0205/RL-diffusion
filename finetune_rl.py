@@ -164,7 +164,7 @@ class NoiseScheduler:
         return self.num_timesteps
 
 
-def sample_trajectories(model, trajectory_count=1000, trajectory_lengths=50):
+def sample_trajectories(model, trajectory_count=1000, trajectory_lengths=50, device='cuda'):
     noise_scheduler = NoiseScheduler(num_timesteps=trajectory_lengths)
     points = torch.randn(trajectory_count, 2)
     timesteps = list(range(trajectory_lengths))[::-1]
@@ -177,10 +177,10 @@ def sample_trajectories(model, trajectory_count=1000, trajectory_lengths=50):
         t = torch.from_numpy(np.repeat(t, trajectory_count)).long()[:, None]
         s = torch.concat((points, t), dim=1)
         with torch.no_grad():
-            residual = model(s).sample()
-        points = noise_scheduler.step(residual, t[0], points)
-        points_at_timestep_n.append(s)
-        actions_at_timestep_n.append(residual.numpy())
+            residual = model(s.to(device)).sample()
+        points = noise_scheduler.step(residual.cpu(), t[0].cpu(), points)
+        points_at_timestep_n.append(s.cpu().numpy())
+        actions_at_timestep_n.append(residual.cpu().numpy())
 
     trajectories = []
     for i in range(trajectory_count):
@@ -361,9 +361,9 @@ if __name__ == "__main__":
     parser.add_argument("--video_log_freq", type=int, default=-1)
     parser.add_argument("--scalar_log_freq", type=int, default=1)
     parser.add_argument("--action_noise_std", type=float, default=0)
-
+    parser.add_argument("--device", type=str, default='cpu', help='')
     config = parser.parse_args()
-
+    device = config.device
     # dataset = datasets.get_dataset(config.dataset)
     # dataloader = DataLoader(
     #    dataset, batch_size=config.train_batch_size, shuffle=True, drop_last=True)
@@ -384,20 +384,20 @@ if __name__ == "__main__":
         time_emb="sinusoidal",
         input_emb="sinusoidal",
     )
-
+    model = model.to(device)
     if config.load_model:
         model.load_state_dict(torch.load(config.load_model))
 
     ob_dim, ac_dim = 3, 2
     agent = PGAgent(
         pretrained=model,
-        learning_rate=config.learning_rate,
-        use_baseline=config.use_baseline,
-        use_reward_to_go=config.use_reward_to_go,
-        baseline_learning_rate=config.baseline_learning_rate,
-        baseline_gradient_steps=config.baseline_gradient_steps,
-        gae_lambda=config.gae_lambda,
-        normalize_advantages=config.normalize_advantages,
+        # learning_rate=config.learning_rate,
+        # use_baseline=config.use_baseline,
+        # use_reward_to_go=config.use_reward_to_go,
+        # baseline_learning_rate=config.baseline_learning_rate,
+        # baseline_gradient_steps=config.baseline_gradient_steps,
+        # gae_lambda=config.gae_lambda,
+        # normalize_advantages=config.normalize_advantages,
     )
 
     noise_scheduler = NoiseScheduler(
@@ -431,11 +431,11 @@ if __name__ == "__main__":
         # model.train()
         # progress_bar = tqdm(total=len(dataloader))
         # progress_bar.set_description(f"Epoch {epoch}")
+        agent.actor.eval()
+        trajs = sample_trajectories(agent.actor, trajectory_count=200, trajectory_lengths=config.num_timesteps, device=device)
 
-        trajs = sample_trajectories(agent.actor, trajectory_count=200, trajectory_lengths=50)
-
-        trajs_dict = {k: torch.Tensor([traj[k] for traj in trajs]) for k in trajs[0]}
-        print("updating agent...")
+        trajs_dict = {k: torch.Tensor([traj[k] for traj in trajs]).to(device) for k in trajs[0]}
+        agent.actor.train()
         loss = agent.update(
             trajs_dict["observation"],
             trajs_dict["action"],
@@ -459,36 +459,35 @@ if __name__ == "__main__":
             plt.savefig(f"{outdir}/epoch={epoch}.png")
             plt.close()
 
-            # # generate data with the model to later visualize the learning process
-            # model.eval()
-            # sample = torch.randn(config.eval_batch_size, 2)
-            # timesteps = list(range(len(noise_scheduler)))[::-1]
-            # for i, t in enumerate(tqdm(timesteps)):
-            #     t = torch.from_numpy(np.repeat(t, config.eval_batch_size)).long()
-            #     with torch.no_grad():
-            #         residual = model(sample, t)
-            #     sample = noise_scheduler.step(residual, t[0], sample)
-            # frames.append(sample.numpy())
+            agent.actor.eval()
+            sample = torch.randn(config.eval_batch_size, 2).to(device)
+            timesteps = list(range(len(noise_scheduler)))[::-1]
+            for i, t in enumerate(tqdm(timesteps)):
+                t = torch.from_numpy(np.repeat(t, config.eval_batch_size)).long().to(device)
+                with torch.no_grad():
+                    residual = agent.actor(torch.cat((sample, t.unsqueeze(-1)), dim=1)).sample()
+                sample = noise_scheduler.step(residual, t[0], sample)
+            frames.append(sample.numpy())
 
     print("Saving model...")
     torch.save(model.state_dict(), f"{outdir}/model.pth")
 
-    # print("Saving images...")
-    # imgdir = f"{outdir}/images"
-    # os.makedirs(imgdir, exist_ok=True)
-    # frames = np.stack(frames)
-    # xmin, xmax = -6, 6
-    # ymin, ymax = -6, 6
-    # for i, frame in enumerate(frames):
-    #     plt.figure(figsize=(10, 10))
-    #     plt.scatter(frame[:, 0], frame[:, 1])
-    #     plt.xlim(xmin, xmax)
-    #     plt.ylim(ymin, ymax)
-    #     plt.savefig(f"{imgdir}/{i:04}.png")
-    #     plt.close()
+    print("Saving images...")
+    imgdir = f"{outdir}/images"
+    os.makedirs(imgdir, exist_ok=True)
+    frames = np.stack(frames)
+    xmin, xmax = -6, 6
+    ymin, ymax = -6, 6
+    for i, frame in enumerate(frames):
+        plt.figure(figsize=(10, 10))
+        plt.scatter(frame[:, 0], frame[:, 1])
+        plt.xlim(xmin, xmax)
+        plt.ylim(ymin, ymax)
+        plt.savefig(f"{imgdir}/{i:04}.png")
+        plt.close()
 
-    # print("Saving loss as numpy array...")
-    # np.save(f"{outdir}/loss.npy", np.array(losses))
+    print("Saving loss as numpy array...")
+    np.save(f"{outdir}/loss.npy", np.array(losses))
 
-    # print("Saving frames...")
-    # np.save(f"{outdir}/frames.npy", frames)
+    print("Saving frames...")
+    np.save(f"{outdir}/frames.npy", frames)
