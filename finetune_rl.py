@@ -291,8 +291,8 @@ def mouth_dataset(n=800):
     mouth_points_y = -(
         0.5 + mouth_radius * np.sin(t) - mouth_radius
     )  # adjust y to position the mouth correctly
-    x = np.concatenate([x, mouth_points_x])
-    y = np.concatenate([y, mouth_points_y])
+    x = mouth_points_x
+    y = mouth_points_y
 
     X = np.stack((x, y), axis=1)
     X *= 3
@@ -389,7 +389,7 @@ if __name__ == "__main__":
         hidden_size=128,
         hidden_layers=3,
         emb_size=128,
-        learning_rate=1e-5,
+        learning_rate=1e-3,
         time_emb="sinusoidal",
         input_emb="sinusoidal",
     )
@@ -437,7 +437,7 @@ if __name__ == "__main__":
         # progress_bar = tqdm(total=len(dataloader))
         # progress_bar.set_description(f"Epoch {epoch}")
 
-        trajs = sample_trajectories(model, trajectory_count=100, trajectory_lengths=50)
+        trajs = sample_trajectories(model, trajectory_count=200, trajectory_lengths=50)
 
         # xmin, xmax = -6, 6
         # ymin, ymax = -6, 6
@@ -446,7 +446,7 @@ if __name__ == "__main__":
         # for t in trajs[:100]:
         #     # plt.plot(t["observation"][:, 0], t["observation"][:, 1])
         #     plt.scatter(t["observation"][:, 0][-1], t["observation"][:, 1][-1])
-        # plt.savefig("./points_path_plot4.png")
+        # plt.savefig("./points_path_plot6.png")
         # exit()
 
         trajs_dict = {k: torch.Tensor([traj[k] for traj in trajs]) for k in trajs[0]}
