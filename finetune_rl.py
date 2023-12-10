@@ -308,7 +308,7 @@ def get_reward(position, timestep, end_timestep):
 
     if timestep == end_timestep:
         return goodness(position, good_points, bad_points)
-
+        
     return 0
 
 
@@ -400,13 +400,13 @@ if __name__ == "__main__":
     ob_dim, ac_dim = 3, 2
     agent = PGAgent(
         pretrained=model,
-        learning_rate=config.learning_rate,
-        use_baseline=config.use_baseline,
-        use_reward_to_go=config.use_reward_to_go,
-        baseline_learning_rate=config.baseline_learning_rate,
-        baseline_gradient_steps=config.baseline_gradient_steps,
-        gae_lambda=config.gae_lambda,
-        normalize_advantages=config.normalize_advantages,
+        # learning_rate=config.learning_rate,
+        # use_baseline=config.use_baseline,
+        # use_reward_to_go=config.use_reward_to_go,
+        # baseline_learning_rate=config.baseline_learning_rate,
+        # baseline_gradient_steps=config.baseline_gradient_steps,
+        # gae_lambda=config.gae_lambda,
+        # normalize_advantages=config.normalize_advantages,
     )
 
     noise_scheduler = NoiseScheduler(
@@ -436,8 +436,8 @@ if __name__ == "__main__":
         # model.train()
         # progress_bar = tqdm(total=len(dataloader))
         # progress_bar.set_description(f"Epoch {epoch}")
-
-        trajs = sample_trajectories(model, trajectory_count=200, trajectory_lengths=50)
+        agent.actor.eval()
+        trajs = sample_trajectories(agent.actor, trajectory_count=200, trajectory_lengths=config.num_timesteps)
 
         # xmin, xmax = -6, 6
         # ymin, ymax = -6, 6
@@ -450,6 +450,7 @@ if __name__ == "__main__":
         # exit()
 
         trajs_dict = {k: torch.Tensor([traj[k] for traj in trajs]) for k in trajs[0]}
+        agent.actor.train()
         loss = agent.update(
             trajs_dict["observation"],
             trajs_dict["action"],
