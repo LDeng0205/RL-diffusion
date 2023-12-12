@@ -107,7 +107,7 @@ def get_reward(state, end_timestep):
     position, timestep = state[:2], state[2]    
 
     if timestep.item() == end_timestep:
-        return get_goodness_almost_overlap_top(position[0].item(), position[1].item())
+        return get_goodness_almost_overlap_right(position[0].item(), position[1].item())
 
     return 0
     # return 1 / (position[1] + 1e-6)
