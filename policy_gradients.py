@@ -37,37 +37,70 @@ class DiffusionActor(MLP):
         )
 
     def update(self, obs, actions, advantages):
-
+        self.optimizer.zero_grad()
         log_p = self.forward(obs).log_prob(actions)
         loss = -torch.sum(torch.mul(log_p, advantages))
-        self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
         return loss.item()
+    
+class Critic(MLP):
+    def __init__(
+        self,
+        learning_rate: float = 0.001,
+        hidden_size: int = 128,
+        hidden_layers: int = 3,
+        emb_size: int = 128,
+        time_emb: str = "sinusoidal",
+        input_emb: str = "sinusoidal",
+    ):
+        super().__init__(hidden_size, hidden_layers, emb_size, time_emb, input_emb)
 
+        self.optimizer = torch.optim.Adam(
+            self.parameters(),
+            learning_rate,
+        )
+        
+        self.mse = nn.MSELoss()
+
+    def forward(self, obs):
+        x, t = obs[..., :2], obs[..., 2]
+        out = torch.sum(super().forward(x, t), dim=1)
+        return out
+
+    def update(self, obs, q_values):
+        # q_values = (q_values - q_values.mean())/(q_values.std())
+
+        self.optimizer.zero_grad()
+        pred = self.forward(obs)
+        loss = self.mse(q_values, pred)
+        loss.backward()
+        self.optimizer.step()
+
+        return loss.item()
 
 class PGAgent(nn.Module):
     def __init__(
         self,
         pretrained,
         gamma=0.999,
-        learning_rate=0.01,
         use_baseline=False,
         use_reward_to_go=False,
-        baseline_learning_rate=None,
-        baseline_gradient_steps=None,
+        baseline_learning_rate=0.01,
+        baseline_gradient_steps=20,
         gae_lambda=None,
-        normalize_advantages=False,
+        advantage_normalization=True,
+        device='cpu',
     ):
         super().__init__()
 
         # create the actor (policy) network
         self.actor = pretrained
-
+        
         # create the critic (baseline) network, if needed
         if use_baseline:
-            # TODO implement critic network self.critic =
+            self.critic = Critic(learning_rate=baseline_learning_rate).to(device)
             self.baseline_gradient_steps = baseline_gradient_steps
         else:
             self.critic = None
@@ -76,7 +109,7 @@ class PGAgent(nn.Module):
         self.gamma = gamma
         self.use_reward_to_go = use_reward_to_go
         self.gae_lambda = gae_lambda
-        self.normalize_advantages = normalize_advantages
+        self.advantage_normalization = advantage_normalization
 
     def _calculate_q_vals(self, rewards):
         discounted_rtg = []
@@ -98,8 +131,17 @@ class PGAgent(nn.Module):
     def _estimate_advantage(self, obs, rewards, q_values):
         # If no baseline (value function), just return q_values
         # TODO: implement reward
-        advantages = copy.deepcopy(q_values)
-        advantages = (advantages - advantages.mean())/(advantages.std())
+        if self.critic is None:
+            advantages = copy.deepcopy(q_values)
+        else:
+            self.critic.eval()
+            with torch.no_grad():
+                values = self.critic(obs.reshape(-1, obs.size(-1)))
+                advantages = q_values - values.reshape(q_values.shape).cpu().numpy()
+        
+        if self.advantage_normalization:
+            advantages = (advantages - advantages.mean())/(advantages.std())
+
         return advantages
 
     def update(self, obs, actions, rewards):
@@ -118,10 +160,16 @@ class PGAgent(nn.Module):
 
         # step 4: if needed, use all datapoints (s_t, a_t, q_t) to update the PG critic/baseline
         if self.critic is not None:
+            self.critic.train()
+            baseline_epoch_loss = 0.0
             for _ in range(self.baseline_gradient_steps):
-                self.critic.update(obs, q_values)  # TODO: log the update information
-
-        return actor_loss
+                baseline_epoch_loss += self.critic.update(obs, torch.tensor(q_values).to(rewards.device).flatten().float())  # TODO: log the update information
+            self.critic.eval()
+            baseline_epoch_loss /= self.baseline_gradient_steps
+        return {
+            "Actor Loss": actor_loss,
+            "Critic Loss": baseline_epoch_loss,
+        }
 
 
 """
