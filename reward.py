@@ -43,6 +43,18 @@ def exponential_oval_decay(x, y, A, k, oval_center, oval_axes, oval_rotation):
     distance = oval_scaled_distance(x, y, oval_center, oval_axes, oval_rotation)
     return A * np.exp(-k * distance)
 
+def is_point_in_rotated_oval(x, y, oval_center, oval_axes, oval_rotation):
+    ox, oy = oval_center
+    a, b = oval_axes
+    theta = np.radians(oval_rotation)  # Convert to radians if necessary
+
+    # Rotate the point
+    x_rotated = (x - ox) * np.cos(theta) + (y - oy) * np.sin(theta)
+    y_rotated = -(x - ox) * np.sin(theta) + (y - oy) * np.cos(theta)
+
+    # Check if the point is inside the oval
+    return ((x_rotated**2 / a**2) + (y_rotated**2 / b**2)) <= 1
+
 def get_goodness_slight_overlap(x, y):
     oval_center = (0.4*4, 0.3*4)
     oval_axes = (0.1*4, 0.2*4)
@@ -64,6 +76,29 @@ def get_goodness_almost_overlap(x, y):
 
     return exponential_oval_decay(x, y, 10, 1, oval_center, oval_axes, oval_rotation)
 
+def get_goodness_almost_overlap_top(x, y):
+    oval_center = (0.3*4, 0.85*4)
+    oval_axes = (0.2*4, 0.1*4)
+    oval_rotation = 10
+
+    return exponential_oval_decay(x, y, 10, 1, oval_center, oval_axes, oval_rotation)
+
+def get_goodness_almost_overlap_right(x, y):
+    oval_center = (0.75*4, 0.6*4)
+    oval_axes = (0.1*4, 0.2*4)
+    oval_rotation = 10
+
+    return exponential_oval_decay(x, y, 10, 1, oval_center, oval_axes, oval_rotation)
+
+def get_goodness_almost_overlap_step(x, y):
+    oval_center = (0.25*4, 0.25*4)
+    oval_axes = (0.1*4, 0.2*4)
+    oval_rotation = 10
+
+    booleans = is_point_in_rotated_oval(x, y, oval_center, oval_axes, oval_rotation)
+
+    return np.where(booleans, 10, 0)
+
 def get_goodness_move_up(x, y):
   return np.exp(y)
 
@@ -72,7 +107,7 @@ def get_reward(state, end_timestep):
     position, timestep = state[:2], state[2]    
 
     if timestep.item() == end_timestep:
-        return get_goodness_almost_overlap(position[0].item(), position[1].item())
+        return get_goodness_almost_overlap_top(position[0].item(), position[1].item())
 
     return 0
     # return 1 / (position[1] + 1e-6)

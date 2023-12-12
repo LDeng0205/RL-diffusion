@@ -123,6 +123,7 @@ if __name__ == "__main__":
     """
     global_step = 0
     frames = []
+    rewards = []
     losses = []
     print("Finetunning model...")
     
@@ -142,6 +143,7 @@ if __name__ == "__main__":
             trajs_dict["reward"],
         )
         print(f"{epoch} / {config.num_epochs} loss: {loss}")
+        losses.append(loss)
 
         if epoch % config.save_images_step == 0 or epoch == config.num_epochs - 1:
             # xmin, xmax = -6, 6
@@ -164,6 +166,20 @@ if __name__ == "__main__":
                 sample = noise_scheduler.step(residual, t[0], sample)
             frames.append(sample.numpy())
 
+            
+            class l:
+                def __init__(self, i):
+                    self.i = i
+                def item(self):
+                    return self.i
+            avg = 0
+            for x, y in sample:
+                r = get_reward((l(x), l(y), l(0)), 0).item()
+                avg += r
+            avg /= len(sample)
+            rewards.append(avg)
+            print(f"reward: {avg}")
+
     print("Saving model...")
     torch.save(model.state_dict(), f"{outdir}/model.pth")
 
@@ -183,6 +199,9 @@ if __name__ == "__main__":
 
     print("Saving loss as numpy array...")
     np.save(f"{outdir}/loss.npy", np.array(losses))
+
+    print("Saving reward as numpy array...")
+    np.save(f"{outdir}/reward.npy", np.array(rewards))
 
     print("Saving frames...")
     np.save(f"{outdir}/frames.npy", frames)
