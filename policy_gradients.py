@@ -27,7 +27,7 @@ class DiffusionActor(MLP):
             learning_rate,
         )
 
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=5, gamma=0.95)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=20, gamma=0.95)
 
     def forward(self, obs):
         x, t = obs[..., :2], obs[..., 2]
