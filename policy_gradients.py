@@ -27,6 +27,8 @@ class DiffusionActor(MLP):
             learning_rate,
         )
 
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=5, gamma=0.95)
+
     def forward(self, obs):
         x, t = obs[..., :2], obs[..., 2]
         mean = super().forward(x, t)
@@ -42,6 +44,7 @@ class DiffusionActor(MLP):
         loss = -torch.sum(torch.mul(log_p, advantages))
         loss.backward()
         self.optimizer.step()
+        self.scheduler.step()
 
         return loss.item()
     
@@ -159,6 +162,7 @@ class PGAgent(nn.Module):
         actor_loss = self.actor.update(obs, actions, advantages)
 
         # step 4: if needed, use all datapoints (s_t, a_t, q_t) to update the PG critic/baseline
+        baseline_epoch_loss = None
         if self.critic is not None:
             self.critic.train()
             baseline_epoch_loss = 0.0
