@@ -79,6 +79,8 @@ if __name__ == "__main__":
     parser.add_argument("--time_embedding", type=str, default="sinusoidal", choices=["sinusoidal", "learnable", "linear", "zero"],)
     parser.add_argument("--input_embedding", type=str, default="sinusoidal", choices=["sinusoidal", "learnable", "linear", "identity"],)
     parser.add_argument("--save_images_step", type=int, default=5)
+    parser.add_argument("--use_baseline", action='store_true', default=False, help='')
+
     parser.add_argument("--batch_size", "-b", type=int, default=1000)  # steps collected per train iteration
     parser.add_argument("--eval_batch_size", "-eb", type=int, default=400)  # steps collected per eval iteration
     parser.add_argument("--seed", type=int, default=1)
@@ -100,7 +102,10 @@ if __name__ == "__main__":
         model.load_state_dict(torch.load(config.load_model))
 
     ob_dim, ac_dim = 3, 2
-    agent = PGAgent(pretrained=model,)
+    agent = PGAgent(
+        pretrained=model,
+        use_baseline=config.use_baseline
+    )
 
     noise_scheduler = NoiseScheduler(
         num_timesteps=config.num_timesteps, beta_schedule=config.beta_schedule
@@ -141,7 +146,8 @@ if __name__ == "__main__":
             trajs_dict["action"],
             trajs_dict["reward"],
         )
-        print(f"{epoch} / {config.num_epochs} loss: {loss}")
+        print(f"{epoch} / {config.num_epochs} Actor loss: {loss['Actor Loss']}")
+        print(f"{epoch} / {config.num_epochs} Critic loss: {loss['Critic Loss']}")
 
         if epoch % config.save_images_step == 0 or epoch == config.num_epochs - 1:
             # xmin, xmax = -6, 6
@@ -163,6 +169,8 @@ if __name__ == "__main__":
                     residual = agent.actor(torch.cat((sample, t.unsqueeze(-1)), dim=1)).sample()
                 sample = noise_scheduler.step(residual, t[0], sample)
             frames.append(sample.numpy())
+            # sample is of shape (eval_batch_szie, 2)
+            # call reward function on all samples and sum
 
     print("Saving model...")
     torch.save(model.state_dict(), f"{outdir}/model.pth")
