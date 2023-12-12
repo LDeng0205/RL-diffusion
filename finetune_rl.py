@@ -14,6 +14,8 @@ import datasets
 from ddpm import *
 from positional_embeddings import PositionalEmbedding
 
+from reward import get_reward
+
 from policy_gradients import DiffusionActor, PGAgent
 
 def sample_trajectories(model, trajectory_count=1000, trajectory_lengths=50, device='cuda'):
@@ -60,18 +62,6 @@ def sample_trajectories(model, trajectory_count=1000, trajectory_lengths=50, dev
         )
 
     return trajectories
-
-
-
-def get_reward(state, end_timestep):
-    # compute distance to prefered points and disliked points, return average
-    position, timestep = state[:2], state[2]    
-
-    if timestep.item() == end_timestep:
-        return np.exp(position[1].item())
-
-    return 0
-    # return 1 / (position[1] + 1e-6)
 
 
 if __name__ == "__main__":
